@@ -1,6 +1,6 @@
 module jwt
 
-import time { Time }
+import time
 
 type JsTime = string
 
@@ -11,9 +11,9 @@ pub:
 	aud ?string @[omitempty]
 	exp JsTime  @[omitempty]
 	iat JsTime  @[omitempty]
-	ext T @[omitempty]
+	ext T       @[omitempty]
 }
 
-pub fn (jst JsTime) time() ?Time {
-	return time.parse(jst) or { none }
+pub fn (jst JsTime) time() ?time.Time {
+	return time.parse(jst) or { return none }
 }
