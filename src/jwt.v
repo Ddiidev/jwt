@@ -109,11 +109,17 @@ pub fn (t Token[T]) valid_with_options(options SigningOptions) bool {
 		return false
 	}
 
-	expected_signature := sign_payload(options.alg, options.key_material, '${parts[0]}.${parts[1]}') or {
-		return false
+	message := '${parts[0]}.${parts[1]}'
+	return match header_alg {
+		.hs256 {
+			expected_signature := sign_payload(.hs256, options.key_material, message) or { return false }
+			parts[2] == expected_signature
+		}
+		.rs256 {
+			signature := base64.url_decode(parts[2]) or { return false }
+			verify_rs256_signature(message, signature, options.key_material) or { return false }
+		}
 	}
-
-	return parts[2] == expected_signature
 }
 
 pub fn (t Token[T]) expired() bool {

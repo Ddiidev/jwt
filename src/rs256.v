@@ -7,8 +7,10 @@ module jwt
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/objects.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
+#include <openssl/sha.h>
 
 fn C.BIO_new_mem_buf(buf voidptr, len int) &C.BIO
 fn C.BIO_free(bio &C.BIO) int
@@ -22,7 +24,12 @@ fn C.EVP_MD_CTX_new() &C.EVP_MD_CTX
 fn C.EVP_PKEY_free(pkey &C.EVP_PKEY)
 fn C.EVP_PKEY_get0_RSA(pkey &C.EVP_PKEY) &C.RSA
 fn C.EVP_sha256() &C.EVP_MD
+fn C.PEM_read_bio_RSAPublicKey(bp &C.BIO, x &&C.RSA, cb voidptr, u voidptr) &C.RSA
+fn C.PEM_read_bio_RSA_PUBKEY(bp &C.BIO, x &&C.RSA, cb voidptr, u voidptr) &C.RSA
 fn C.PEM_read_bio_PrivateKey(bp &C.BIO, x &&C.EVP_PKEY, cb voidptr, u voidptr) &C.EVP_PKEY
+fn C.RSA_free(rsa &C.RSA)
+fn C.RSA_verify(type_ int, m &u8, m_len u32, sigbuf &u8, siglen u32, rsa &C.RSA) int
+fn C.SHA256(d &u8, n usize, md &u8) &u8
 
 fn openssl_error(message string) IError {
 	err_code := C.ERR_get_error()
@@ -55,6 +62,69 @@ fn validate_private_key_pem_format(private_key_pem string) ! {
 	if has_pkcs8 && !trimmed.contains('-----END PRIVATE KEY-----') {
 		return error('RS256 signing failed: invalid PEM private key format (missing END PRIVATE KEY marker)')
 	}
+}
+
+fn validate_public_key_pem_format(public_key_pem string) !string {
+	trimmed := public_key_pem.trim_space()
+	if trimmed.len == 0 {
+		return error('RS256 verification failed: PEM public key cannot be empty')
+	}
+
+	return trimmed
+}
+
+fn new_bio_from_pem(public_key_pem string) !&C.BIO {
+	key_bio := C.BIO_new_mem_buf(public_key_pem.str, public_key_pem.len)
+	if key_bio == unsafe { nil } {
+		return openssl_error('RS256 verification failed: unable to allocate OpenSSL BIO for PEM')
+	}
+
+	return key_bio
+}
+
+fn parse_rsa_public_key(public_key_pem string) !&C.RSA {
+	primary_bio := new_bio_from_pem(public_key_pem)!
+	defer {
+		C.BIO_free(primary_bio)
+	}
+
+	rsa := C.PEM_read_bio_RSA_PUBKEY(primary_bio, unsafe { nil }, unsafe { nil }, unsafe { nil })
+	if rsa != unsafe { nil } {
+		return rsa
+	}
+
+	fallback_bio := new_bio_from_pem(public_key_pem)!
+	defer {
+		C.BIO_free(fallback_bio)
+	}
+
+	rsa = C.PEM_read_bio_RSAPublicKey(fallback_bio, unsafe { nil }, unsafe { nil }, unsafe { nil })
+	if rsa == unsafe { nil } {
+		return openssl_error('RS256 verification failed: unable to parse PEM public key (expected BEGIN PUBLIC KEY or BEGIN RSA PUBLIC KEY)')
+	}
+
+	return rsa
+}
+
+pub fn verify_rs256_signature(message string, signature []u8, public_key_pem string) !bool {
+	trimmed_pem := validate_public_key_pem_format(public_key_pem)!
+
+	rsa := parse_rsa_public_key(trimmed_pem)!
+	defer {
+		C.RSA_free(rsa)
+	}
+
+	mut digest := []u8{len: 32, init: 0}
+	if C.SHA256(message.str, message.len, digest.data) == unsafe { nil } {
+		return openssl_error('RS256 verification failed: unable to compute SHA-256 digest')
+	}
+
+	verify_result := C.RSA_verify(C.NID_sha256, digest.data, u32(digest.len), signature.data, u32(signature.len), rsa)
+	if verify_result == 1 {
+		return true
+	}
+
+	return false
 }
 
 fn sign_rs256_bytes(message []u8, private_key_pem string) ![]u8 {
