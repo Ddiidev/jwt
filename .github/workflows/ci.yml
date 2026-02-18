@@ -23,5 +23,5 @@ jobs:
       - name: Check formatting
         run: v fmt -verify src/*.v
 
-      - name: Run tests
-        run: v test .
+      - name: Run project tests
+        run: v test src
