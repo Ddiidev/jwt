@@ -26,11 +26,29 @@ pub fn algorithm_from_jwt_name(name string) !Algorithm {
 	}
 }
 
-pub struct SigningOptions {
+pub struct Hs256SigningOptions {
 pub:
-	alg          Algorithm = .hs256
-	key_material string
+	secret string
 }
+
+pub struct Rs256SigningOptions {
+pub:
+	private_key_pem string
+}
+
+pub type SigningOptions = Hs256SigningOptions | Rs256SigningOptions
+
+pub struct Hs256ValidationOptions {
+pub:
+	secret string
+}
+
+pub struct Rs256ValidationOptions {
+pub:
+	public_key_pem string
+}
+
+pub type ValidationOptions = Hs256ValidationOptions | Rs256ValidationOptions
 
 pub struct Token[T] {
 	header      string
@@ -45,15 +63,21 @@ pub fn Token.new[T](payload Payload[T], secret string) Token[T] {
 }
 
 pub fn Token.new_hs256[T](payload Payload[T], secret string) Token[T] {
-	return Token.new_with_options(payload, SigningOptions{alg: .hs256, key_material: secret}) or {
+	return Token.new_with_options(payload, Hs256SigningOptions{secret: secret}) or {
+		panic(err.msg())
+	}
+}
+
+pub fn Token.new_rs256[T](payload Payload[T], private_key_pem string) Token[T] {
+	return Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: private_key_pem}) or {
 		panic(err.msg())
 	}
 }
 
 pub fn Token.new_with_options[T](payload Payload[T], options SigningOptions) !Token[T] {
-	header := base64.url_encode(json.encode(new_header(HeaderOptions{alg: options.alg})).bytes())
+	header := base64.url_encode(json.encode(new_header(HeaderOptions{alg: signing_algorithm(options)})).bytes())
 	payload_b64 := base64.url_encode(json.encode(payload).bytes())
-	signature := sign_payload(options.alg, options.key_material, '${header}.${payload_b64}')!
+	signature := sign_payload(options, '${header}.${payload_b64}')!
 
 	return Token[T]{
 		header: header
@@ -90,10 +114,18 @@ pub fn (t Token[T]) str() string {
 }
 
 pub fn (t Token[T]) valid(secret string) bool {
-	return t.valid_with_options(SigningOptions{alg: .hs256, key_material: secret})
+	return t.valid_hs256(secret)
 }
 
-pub fn (t Token[T]) valid_with_options(options SigningOptions) bool {
+pub fn (t Token[T]) valid_hs256(secret string) bool {
+	return t.valid_with_options(Hs256ValidationOptions{secret: secret})
+}
+
+pub fn (t Token[T]) valid_rs256(public_key_pem string) bool {
+	return t.valid_with_options(Rs256ValidationOptions{public_key_pem: public_key_pem})
+}
+
+pub fn (t Token[T]) valid_with_options(options ValidationOptions) bool {
 	if t.expired() {
 		return false
 	}
@@ -105,19 +137,19 @@ pub fn (t Token[T]) valid_with_options(options SigningOptions) bool {
 
 	header := json.decode(Header, base64.url_decode_str(parts[0])) or { return false }
 	header_alg := algorithm_from_jwt_name(header.alg) or { return false }
-	if header_alg != options.alg {
+	if header_alg != validation_algorithm(options) {
 		return false
 	}
 
 	message := '${parts[0]}.${parts[1]}'
-	return match header_alg {
-		.hs256 {
-			expected_signature := sign_payload(.hs256, options.key_material, message) or { return false }
+	return match options {
+		Hs256ValidationOptions {
+			expected_signature := sign_hs256(message, options.secret)
 			parts[2] == expected_signature
 		}
-		.rs256 {
+		Rs256ValidationOptions {
 			signature := base64.url_decode(parts[2]) or { return false }
-			verify_rs256_signature(message, signature, options.key_material) or { return false }
+			verify_rs256_signature(message, signature, options.public_key_pem) or { return false }
 		}
 	}
 }
@@ -126,13 +158,31 @@ pub fn (t Token[T]) expired() bool {
 	return t.payload.exp.time() or { return false } < time.now()
 }
 
-fn sign_payload(alg Algorithm, key_material string, value string) !string {
-	return match alg {
-		.hs256 {
-			base64.url_encode(hmac.new(key_material.bytes(), value.bytes(), sha256.sum, sha256.block_size).bytestr().bytes())
+fn signing_algorithm(options SigningOptions) Algorithm {
+	return match options {
+		Hs256SigningOptions { .hs256 }
+		Rs256SigningOptions { .rs256 }
+	}
+}
+
+fn validation_algorithm(options ValidationOptions) Algorithm {
+	return match options {
+		Hs256ValidationOptions { .hs256 }
+		Rs256ValidationOptions { .rs256 }
+	}
+}
+
+fn sign_hs256(value string, secret string) string {
+	return base64.url_encode(hmac.new(secret.bytes(), value.bytes(), sha256.sum, sha256.block_size).bytestr().bytes())
+}
+
+fn sign_payload(options SigningOptions, value string) !string {
+	return match options {
+		Hs256SigningOptions {
+			sign_hs256(value, options.secret)
 		}
-		.rs256 {
-			signed := sign_rs256_bytes(value.bytes(), key_material)!
+		Rs256SigningOptions {
+			signed := sign_rs256_bytes(value.bytes(), options.private_key_pem)!
 			base64.url_encode(signed)
 		}
 	}
