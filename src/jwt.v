@@ -8,6 +8,7 @@ import time
 
 pub struct Token[T] {
 	header    string
+	payload_b64 string
 	signature string
 pub:
 	payload Payload[T]
@@ -58,12 +59,13 @@ fn header_alg(header string) !string {
 pub fn Token.new[T](payload Payload[T], secret string) Token[T] {
 	header_obj := Header{}
 	header := base64.url_encode(json.encode(header_obj).bytes())
-	payload_string := base64.url_encode(json.encode(payload).bytes())
-	message := '${header}.${payload_string}'
+	payload_b64 := base64.url_encode(json.encode(payload).bytes())
+	message := '${header}.${payload_b64}'
 	signature := sign_by_alg(header_obj.alg, message, secret) or { panic(err) }
 
 	return Token[T]{
 		header: header
+		payload_b64: payload_b64
 		payload: payload
 		signature: signature
 	}
@@ -77,14 +79,14 @@ pub fn from_str[T](token string) !Token[T] {
 
 	return Token[T]{
 		header: parts[0]
+		payload_b64: parts[1]
 		payload: json.decode(Payload[T], base64.url_decode_str(parts[1]))!
 		signature: parts[2]
 	}
 }
 
 pub fn (t Token[T]) str() string {
-	payload := base64.url_encode(json.encode(t.payload).bytes())
-	return t.header + '.' + payload + '.' + t.signature
+	return t.header + '.' + t.payload_b64 + '.' + t.signature
 }
 
 pub fn (t Token[T]) valid(secret string) bool {
@@ -92,16 +94,15 @@ pub fn (t Token[T]) valid(secret string) bool {
 		return false
 	}
 
-	parts := t.str().split('.')
-	if parts.len != 3 {
+	if t.header.len == 0 || t.payload_b64.len == 0 || t.signature.len == 0 {
 		return false
 	}
 
-	alg := header_alg(parts[0]) or {
+	alg := header_alg(t.header) or {
 		return false
 	}
 
-	return verify_by_alg(alg, '${parts[0]}.${parts[1]}', parts[2], secret) or {
+	return verify_by_alg(alg, '${t.header}.${t.payload_b64}', t.signature, secret) or {
 		false
 	}
 }
