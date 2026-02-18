@@ -2,6 +2,7 @@ module jwt
 
 import encoding.base64
 import json
+import os
 import time
 
 const no_secret = 'pass secret'
@@ -10,39 +11,14 @@ const claims = {
 	'name':  'John Doe'
 	'admin': 'true'
 }
-const rsa_private_key = '"""
------BEGIN PRIVATE KEY-----
-MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBALfKh8YY59j47ByW
-NqL7IP4JRHQKpuUQf4Csx6u4jEmxRcXxt/MnYKT4mM7xBNmIJY5jrpYvNSk9M9Qx
-vfzL9lnb81I6fA4j4IgqpV4yVQPr+7z4TNg+bBfM0wMDDhprK7I/N6+JkhynMUP2
-qfmfM6cv7piA5Y8v5d8Shs7M7WgHAgMBAAECgYEArf1KhIftT4xA/8GPr27S2w7p
-nPV0JXUXh4wfN14R4d4LslN6A90x0JkKsAN6YfUtgSmAuiZgaZODG8xjP6M9n44M
-D2JEo4QY6f9L5lN2hax2SGM4LhRiMBSk9dP+K2kqAf+ep6zkBdtSDzwbYjLifAnl
-Pl8oI3hG4N7xRjbCjrECQQDzW8cu0S/Uq8hQJjQvjicT6Nid6EaWKfQEdxUp6jdG
-NwWdrQvYskE7S48C84D8xQu+Uad2+aYf2xVhAcv8wBzPAkEAww7vG9P8FXQF8Mx2
-xPJX6QZ9xA8Nzyf6nKFl3Qm6STp5D5B9Y0hQO6Qb1MmVfLoPAxwRNj5VCl6AotQe
-XQGfNQJBAIbO6xms3n8bLn2MtRWrfwYb5X+9gXkM11Jq2S8F3IkxKyW4y5eA5Hkl
-B5q4WpL5rIQ54OrFQ9pRkQLeZNhPWrECQDzX+E4Gt+Q4whwEDwQG1xkBsNf4NHQm
-xCcPz0rD+LhJmFrSPuRjv1kVIpYVqL4h0Cr4Lm5M1Qq+X9mPXGVmJmUCQF4LKn8i
-wjVf7wB6qU9wsMJKyQd84mmfi8P9dv9U+MTQ6MTLf3X3I9vv68sW6l0Y3zYv0sLr
-vJ4i8d9xE5mAwHw=
------END PRIVATE KEY-----
-"""'
-const rsa_public_key = '"""
------BEGIN PUBLIC KEY-----
-MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3yofGGOfY+Owcljai+yD+CUR0
-CqblEH+ArMeruIxJsUXF8bfzJ2Ck+JjO8QTZiCWOY66WLzUpPTPUMb38y/ZZ2/NS
-OnwOI+CIKqVeMlUD6/u8+EzYPmwXzNMDAw4aayuyPzeviZIcpzFD9qn5nzOnL+6Y
-gOWPL+XfEobOzO1oBwIDAQAB
------END PUBLIC KEY-----
-"""'
-const rsa_public_key_pkcs1 = '"""
------BEGIN RSA PUBLIC KEY-----
-MIGJAoGBALfKh8YY59j47ByWNqL7IP4JRHQKpuUQf4Csx6u4jEmxRcXxt/MnYKT4
-mM7xBNmIJY5jrpYvNSk9M9QxvfzL9lnb81I6fA4j4IgqpV4yVQPr+7z4TNg+bBfM
-0wMDDhprK7I/N6+JkhynMUP2qfmfM6cv7piA5Y8v5d8Shs7M7WgHAgMBAAE=
------END RSA PUBLIC KEY-----
-"""'
+
+fn fixture_path(name string) string {
+	return os.join_path(os.dir(os.dir(@FILE)), 'testdata', name)
+}
+
+fn load_fixture(name string) string {
+	return os.read_file(fixture_path(name)) or { panic('failed to load fixture `${name}`: ${err.msg()}') }
+}
 
 fn test_valid() {
 	payload := Payload[map[string]string]{
@@ -129,38 +105,71 @@ fn test_valid_with_options_uses_algorithm() {
 	assert !token.valid_with_options(Rs256ValidationOptions{public_key_pem: jwt.secret})
 }
 
-fn test_new_with_options_rs256() {
+fn test_rs256_create_and_validate_with_fixture_keys() {
 	payload := Payload[map[string]string]{
 		sub: '1234567890'
 		ext: jwt.claims
 	}
-	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: jwt.rsa_private_key})!
+	private_key := load_fixture('rs256_private.pem')
+	public_key := load_fixture('rs256_public.pem')
+	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: private_key})!
 
 	assert token.signature.len > 0
-	assert token.valid_with_options(Rs256ValidationOptions{public_key_pem: jwt.rsa_public_key})
+	assert token.valid_with_options(Rs256ValidationOptions{public_key_pem: public_key})
 }
 
-fn test_rs256_validates_pkcs1_public_key() {
+fn test_rs256_fails_with_wrong_public_key_fixture() {
 	payload := Payload[map[string]string]{
 		sub: '1234567890'
 		ext: jwt.claims
 	}
-	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: jwt.rsa_private_key})!
+	private_key := load_fixture('rs256_private.pem')
+	wrong_public_key := load_fixture('rs256_public_wrong.pem')
+	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: private_key})!
 
-	assert token.valid_with_options(Rs256ValidationOptions{public_key_pem: jwt.rsa_public_key_pkcs1})
+	assert !token.valid_with_options(Rs256ValidationOptions{public_key_pem: wrong_public_key})
 }
 
-fn test_rs256_rejects_invalid_signature_with_public_key() {
+fn test_rs256_fails_with_tampered_signature() {
 	payload := Payload[map[string]string]{
 		sub: '1234567890'
 		ext: jwt.claims
 	}
-	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: jwt.rsa_private_key})!
+	private_key := load_fixture('rs256_private.pem')
+	public_key := load_fixture('rs256_public.pem')
+	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: private_key})!
 	parts := token.str().split('.')
 	broken_signature := parts[2][0..parts[2].len - 1] + if parts[2].ends_with('A') { 'B' } else { 'A' }
 	broken_token := from_str[map[string]string]('${parts[0]}.${parts[1]}.${broken_signature}')!
 
-	assert !broken_token.valid_with_options(Rs256ValidationOptions{public_key_pem: jwt.rsa_public_key})
+	assert !broken_token.valid_with_options(Rs256ValidationOptions{public_key_pem: public_key})
+}
+
+fn test_hs256_regression_still_works() {
+	payload := Payload[map[string]string]{
+		sub: 'legacy-subject'
+		ext: jwt.claims
+	}
+	token := Token.new(payload, jwt.secret)
+	parsed := from_str[map[string]string](token.str())!
+
+	assert parsed.valid(jwt.secret)
+	assert parsed.valid_hs256(jwt.secret)
+}
+
+fn test_from_str_preserves_rs256_header_algorithm() {
+	payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: jwt.claims
+	}
+	private_key := load_fixture('rs256_private.pem')
+	public_key := load_fixture('rs256_public.pem')
+	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: private_key})!
+	parsed := from_str[map[string]string](token.str())!
+	header := json.decode(Header, base64.url_decode_str(parsed.header))!
+
+	assert header.alg == 'RS256'
+	assert parsed.valid_with_options(Rs256ValidationOptions{public_key_pem: public_key})
 }
 
 fn test_rs256_rejects_invalid_public_pem() {
@@ -168,7 +177,8 @@ fn test_rs256_rejects_invalid_public_pem() {
 		sub: '1234567890'
 		ext: jwt.claims
 	}
-	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: jwt.rsa_private_key})!
+	private_key := load_fixture('rs256_private.pem')
+	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: private_key})!
 
 	assert !token.valid_with_options(Rs256ValidationOptions{public_key_pem: 'not-a-pem'})
 }
@@ -217,7 +227,6 @@ fn test_rs256_rejects_invalid_pem() {
 	assert false
 }
 
-
 fn test_rs256_rejects_pem_without_end_marker() {
 	payload := Payload[map[string]string]{
 		sub: '1234567890'
@@ -231,22 +240,4 @@ abc'
 		return
 	}
 	assert false
-}
-
-fn test_valid_hs256_and_valid_rs256_helpers() {
-	hs_payload := Payload[map[string]string]{
-		sub: '1234567890'
-		ext: jwt.claims
-	}
-	hs_token := Token.new_hs256(hs_payload, jwt.secret)
-	assert hs_token.valid_hs256(jwt.secret)
-	assert !hs_token.valid_rs256(jwt.rsa_public_key)
-
-	rs_payload := Payload[map[string]string]{
-		sub: '1234567890'
-		ext: jwt.claims
-	}
-	rs_token := Token.new_rs256(rs_payload, jwt.rsa_private_key)
-	assert rs_token.valid_rs256(jwt.rsa_public_key)
-	assert !rs_token.valid_hs256(jwt.secret)
 }
