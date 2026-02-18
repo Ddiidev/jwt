@@ -13,12 +13,54 @@ pub:
 	payload Payload[T]
 }
 
-pub fn Token.new[T](payload Payload[T], secret string) Token[T] {
-	header := base64.url_encode(json.encode(Header{}).bytes())
-	payload_string := base64.url_encode(json.encode(payload).bytes())
+fn sign_hs256(message string, secret string) string {
+	return base64.url_encode(hmac.new(secret.bytes(), message.bytes(), sha256.sum, sha256.block_size).bytestr().bytes())
+}
 
-	signature := base64.url_encode(hmac.new(secret.bytes(), '${header}.${payload_string}'.bytes(),
-		sha256.sum, sha256.block_size).bytestr().bytes())
+fn verify_hs256(message string, signature string, secret string) bool {
+	return sign_hs256(message, secret) == signature
+}
+
+fn sign_rs256(message string, private_key_pem string) !string {
+	_ := message
+	_ := private_key_pem
+	return error('RS256 signing is not supported in this build')
+}
+
+fn verify_rs256(message string, signature string, public_key_pem string) !bool {
+	_ := message
+	_ := signature
+	_ := public_key_pem
+	return error('RS256 verification is not supported in this build')
+}
+
+fn sign_by_alg(alg string, message string, key string) !string {
+	return match alg {
+		'HS256' { sign_hs256(message, key) }
+		'RS256' { sign_rs256(message, key)! }
+		else { return error('Unsupported algorithm: ${alg}') }
+	}
+}
+
+fn verify_by_alg(alg string, message string, signature string, key string) !bool {
+	return match alg {
+		'HS256' { verify_hs256(message, signature, key) }
+		'RS256' { verify_rs256(message, signature, key)! }
+		else { return error('Unsupported algorithm: ${alg}') }
+	}
+}
+
+fn header_alg(header string) !string {
+	header_json := base64.url_decode_str(header)
+	return json.decode(Header, header_json)!.alg
+}
+
+pub fn Token.new[T](payload Payload[T], secret string) Token[T] {
+	header_obj := Header{}
+	header := base64.url_encode(json.encode(header_obj).bytes())
+	payload_string := base64.url_encode(json.encode(payload).bytes())
+	message := '${header}.${payload_string}'
+	signature := sign_by_alg(header_obj.alg, message, secret) or { panic(err) }
 
 	return Token[T]{
 		header: header
@@ -55,10 +97,13 @@ pub fn (t Token[T]) valid(secret string) bool {
 		return false
 	}
 
-	expected_signature := base64.url_encode(hmac.new(secret.bytes(), '${parts[0]}.${parts[1]}'.bytes(), // header + payload
-	 sha256.sum, sha256.block_size).bytestr().bytes())
+	alg := header_alg(parts[0]) or {
+		return false
+	}
 
-	return parts[2] == expected_signature // signature == expected_signature
+	return verify_by_alg(alg, '${parts[0]}.${parts[1]}', parts[2], secret) or {
+		false
+	}
 }
 
 pub fn (t Token[T]) expired() bool {
