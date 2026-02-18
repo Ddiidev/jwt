@@ -111,7 +111,7 @@ fn test_new_with_options_sets_header_algorithm() {
 		sub: '1234567890'
 		ext: jwt.claims
 	}
-	token := Token.new_with_options(payload, SigningOptions{alg: .hs256, key_material: jwt.secret})!
+	token := Token.new_with_options(payload, Hs256SigningOptions{secret: jwt.secret})!
 	header := json.decode(Header, base64.url_decode_str(token.header))!
 
 	assert header.alg == 'HS256'
@@ -125,8 +125,8 @@ fn test_valid_with_options_uses_algorithm() {
 	}
 	token := Token.new_hs256(payload, jwt.secret)
 
-	assert token.valid_with_options(SigningOptions{alg: .hs256, key_material: jwt.secret})
-	assert !token.valid_with_options(SigningOptions{alg: .rs256, key_material: jwt.secret})
+	assert token.valid_with_options(Hs256ValidationOptions{secret: jwt.secret})
+	assert !token.valid_with_options(Rs256ValidationOptions{public_key_pem: jwt.secret})
 }
 
 fn test_new_with_options_rs256() {
@@ -134,10 +134,10 @@ fn test_new_with_options_rs256() {
 		sub: '1234567890'
 		ext: jwt.claims
 	}
-	token := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: jwt.rsa_private_key})!
+	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: jwt.rsa_private_key})!
 
 	assert token.signature.len > 0
-	assert token.valid_with_options(SigningOptions{alg: .rs256, key_material: jwt.rsa_public_key})
+	assert token.valid_with_options(Rs256ValidationOptions{public_key_pem: jwt.rsa_public_key})
 }
 
 fn test_rs256_validates_pkcs1_public_key() {
@@ -145,9 +145,9 @@ fn test_rs256_validates_pkcs1_public_key() {
 		sub: '1234567890'
 		ext: jwt.claims
 	}
-	token := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: jwt.rsa_private_key})!
+	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: jwt.rsa_private_key})!
 
-	assert token.valid_with_options(SigningOptions{alg: .rs256, key_material: jwt.rsa_public_key_pkcs1})
+	assert token.valid_with_options(Rs256ValidationOptions{public_key_pem: jwt.rsa_public_key_pkcs1})
 }
 
 fn test_rs256_rejects_invalid_signature_with_public_key() {
@@ -155,12 +155,12 @@ fn test_rs256_rejects_invalid_signature_with_public_key() {
 		sub: '1234567890'
 		ext: jwt.claims
 	}
-	token := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: jwt.rsa_private_key})!
+	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: jwt.rsa_private_key})!
 	parts := token.str().split('.')
 	broken_signature := parts[2][0..parts[2].len - 1] + if parts[2].ends_with('A') { 'B' } else { 'A' }
 	broken_token := from_str[map[string]string]('${parts[0]}.${parts[1]}.${broken_signature}')!
 
-	assert !broken_token.valid_with_options(SigningOptions{alg: .rs256, key_material: jwt.rsa_public_key})
+	assert !broken_token.valid_with_options(Rs256ValidationOptions{public_key_pem: jwt.rsa_public_key})
 }
 
 fn test_rs256_rejects_invalid_public_pem() {
@@ -168,9 +168,9 @@ fn test_rs256_rejects_invalid_public_pem() {
 		sub: '1234567890'
 		ext: jwt.claims
 	}
-	token := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: jwt.rsa_private_key})!
+	token := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: jwt.rsa_private_key})!
 
-	assert !token.valid_with_options(SigningOptions{alg: .rs256, key_material: 'not-a-pem'})
+	assert !token.valid_with_options(Rs256ValidationOptions{public_key_pem: 'not-a-pem'})
 }
 
 fn test_verify_rs256_signature_errors_for_invalid_public_pem() {
@@ -197,7 +197,7 @@ fn test_rs256_rejects_empty_pem() {
 		ext: jwt.claims
 	}
 
-	_ := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: ''}) or {
+	_ := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: ''}) or {
 		assert err.msg().contains('PEM private key cannot be empty')
 		return
 	}
@@ -210,7 +210,7 @@ fn test_rs256_rejects_invalid_pem() {
 		ext: jwt.claims
 	}
 
-	_ := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: 'not-a-pem'}) or {
+	_ := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: 'not-a-pem'}) or {
 		assert err.msg().contains('invalid PEM private key format')
 		return
 	}
@@ -226,9 +226,27 @@ fn test_rs256_rejects_pem_without_end_marker() {
 	invalid_pem := '-----BEGIN PRIVATE KEY-----
 abc'
 
-	_ := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: invalid_pem}) or {
+	_ := Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: invalid_pem}) or {
 		assert err.msg().contains('missing END PRIVATE KEY marker')
 		return
 	}
 	assert false
+}
+
+fn test_valid_hs256_and_valid_rs256_helpers() {
+	hs_payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: jwt.claims
+	}
+	hs_token := Token.new_hs256(hs_payload, jwt.secret)
+	assert hs_token.valid_hs256(jwt.secret)
+	assert !hs_token.valid_rs256(jwt.rsa_public_key)
+
+	rs_payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: jwt.claims
+	}
+	rs_token := Token.new_rs256(rs_payload, jwt.rsa_private_key)
+	assert rs_token.valid_rs256(jwt.rsa_public_key)
+	assert !rs_token.valid_hs256(jwt.secret)
 }
