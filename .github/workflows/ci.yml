@@ -27,6 +27,14 @@ jobs:
         run: |
           git rev-parse HEAD
           sed -n '170,230p' src/rs256.v
+          if rg -n "RSA_size\(|sha256_digest\(message\)!" src/rs256.v; then
+            echo "Detected stale/conflicted RS256 signer code in src/rs256.v"
+            exit 1
+          fi
+          if ! rg -n "mut sig_len := usize\(0\)" src/rs256.v; then
+            echo "Expected EVP signer preflight (sig_len init) not found in src/rs256.v"
+            exit 1
+          fi
 
       - name: Run project tests
         run: v test src
