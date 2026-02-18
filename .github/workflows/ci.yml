@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  fmt-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup V
+        uses: vlang/setup-v@v1.4
+        with:
+          v-version: latest
+
+      - name: V version
+        run: v version
+
+      - name: Check formatting
+        run: v fmt -verify src/*.v
+
+
+      - name: Debug checked commit and RS256 signer block
+        run: |
+          git rev-parse HEAD
+          sed -n '170,230p' src/rs256.v
+
+      - name: Run project tests
+        run: v test src
