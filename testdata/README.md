@@ -10,7 +10,7 @@ These PEM files are test-only fixtures used by `src/jwt_test.v` to validate RS25
 
 ## Origin
 
-The main pair (`rs256_private.pem` + `rs256_public.pem`) comes from the previously inlined constants that already existed in this repository's tests, moved into stable fixtures for reuse.
+The main pair (`rs256_private.pem` + `rs256_public.pem`) is a dedicated RSA test fixture pair generated for this repository and kept under version control for deterministic CI runs.
 
 The `rs256_public_wrong.pem` key is a separate RSA public key fixture added only to simulate invalid verification scenarios.
 

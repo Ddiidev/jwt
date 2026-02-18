@@ -12,6 +12,24 @@ module jwt
 #include <openssl/rsa.h>
 #include <openssl/sha.h>
 
+@[typedef]
+struct C.BIO {}
+
+@[typedef]
+struct C.RSA {}
+
+@[typedef]
+struct C.EVP_MD {}
+
+@[typedef]
+struct C.EVP_MD_CTX {}
+
+@[typedef]
+struct C.EVP_PKEY {}
+
+@[typedef]
+struct C.EVP_PKEY_CTX {}
+
 fn C.BIO_new_mem_buf(buf voidptr, len int) &C.BIO
 fn C.BIO_free(bio &C.BIO) int
 fn C.ERR_get_error() u64
@@ -24,9 +42,9 @@ fn C.EVP_MD_CTX_new() &C.EVP_MD_CTX
 fn C.EVP_PKEY_free(pkey &C.EVP_PKEY)
 fn C.EVP_PKEY_get0_RSA(pkey &C.EVP_PKEY) &C.RSA
 fn C.EVP_sha256() &C.EVP_MD
+fn C.PEM_read_bio_PrivateKey(bp &C.BIO, x &&C.EVP_PKEY, cb voidptr, u voidptr) &C.EVP_PKEY
 fn C.PEM_read_bio_RSAPublicKey(bp &C.BIO, x &&C.RSA, cb voidptr, u voidptr) &C.RSA
 fn C.PEM_read_bio_RSA_PUBKEY(bp &C.BIO, x &&C.RSA, cb voidptr, u voidptr) &C.RSA
-fn C.PEM_read_bio_PrivateKey(bp &C.BIO, x &&C.EVP_PKEY, cb voidptr, u voidptr) &C.EVP_PKEY
 fn C.RSA_free(rsa &C.RSA)
 fn C.RSA_verify(type_ int, m &u8, m_len u32, sigbuf &u8, siglen u32, rsa &C.RSA) int
 fn C.SHA256(d &u8, n usize, md &u8) &u8
@@ -38,8 +56,10 @@ fn openssl_error(message string) IError {
 	}
 
 	mut buf := []u8{len: 256, init: 0}
-	C.ERR_error_string_n(err_code, &buf[0], buf.len)
-	details := (&char(&buf[0])).vstring()
+	unsafe {
+		C.ERR_error_string_n(err_code, &buf[0], buf.len)
+	}
+	details := unsafe { (&char(&buf[0])).vstring() }
 	return error('${message}: ${details}')
 }
 
@@ -73,27 +93,46 @@ fn validate_public_key_pem_format(public_key_pem string) !string {
 	return trimmed
 }
 
-fn new_bio_from_pem(public_key_pem string) !&C.BIO {
-	key_bio := C.BIO_new_mem_buf(public_key_pem.str, public_key_pem.len)
-	if key_bio == unsafe { nil } {
-		return openssl_error('RS256 verification failed: unable to allocate OpenSSL BIO for PEM')
+fn new_bio_from_pem(pem string) !&C.BIO {
+	bio := C.BIO_new_mem_buf(pem.str, pem.len)
+	if bio == unsafe { nil } {
+		return openssl_error('unable to allocate OpenSSL BIO for PEM')
+	}
+	return bio
+}
+
+fn parse_private_key(private_key_pem string) !&C.EVP_PKEY {
+	mut bio := new_bio_from_pem(private_key_pem)!
+	defer {
+		C.BIO_free(bio)
 	}
 
-	return key_bio
+	pkey := C.PEM_read_bio_PrivateKey(bio, unsafe { nil }, unsafe { nil }, unsafe { nil })
+	if pkey == unsafe { nil } {
+		return openssl_error('RS256 signing failed: unable to parse PEM private key')
+	}
+
+	if C.EVP_PKEY_get0_RSA(pkey) == unsafe { nil } {
+		C.EVP_PKEY_free(pkey)
+		return error('RS256 signing failed: PEM key is not an RSA private key')
+	}
+
+	return pkey
 }
 
 fn parse_rsa_public_key(public_key_pem string) !&C.RSA {
-	primary_bio := new_bio_from_pem(public_key_pem)!
+	mut primary_bio := new_bio_from_pem(public_key_pem)!
 	defer {
 		C.BIO_free(primary_bio)
 	}
 
-	rsa := C.PEM_read_bio_RSA_PUBKEY(primary_bio, unsafe { nil }, unsafe { nil }, unsafe { nil })
+	mut rsa := C.PEM_read_bio_RSA_PUBKEY(primary_bio, unsafe { nil }, unsafe { nil },
+		unsafe { nil })
 	if rsa != unsafe { nil } {
 		return rsa
 	}
 
-	fallback_bio := new_bio_from_pem(public_key_pem)!
+	mut fallback_bio := new_bio_from_pem(public_key_pem)!
 	defer {
 		C.BIO_free(fallback_bio)
 	}
@@ -106,49 +145,33 @@ fn parse_rsa_public_key(public_key_pem string) !&C.RSA {
 	return rsa
 }
 
+fn sha256_digest(input []u8) ![]u8 {
+	mut digest := []u8{len: 32, init: 0}
+	if C.SHA256(input.data, usize(input.len), digest.data) == unsafe { nil } {
+		return openssl_error('unable to compute SHA-256 digest')
+	}
+	return digest
+}
+
 pub fn verify_rs256_signature(message string, signature []u8, public_key_pem string) !bool {
 	trimmed_pem := validate_public_key_pem_format(public_key_pem)!
-
 	rsa := parse_rsa_public_key(trimmed_pem)!
 	defer {
 		C.RSA_free(rsa)
 	}
 
-	mut digest := []u8{len: 32, init: 0}
-	if C.SHA256(message.str, message.len, digest.data) == unsafe { nil } {
-		return openssl_error('RS256 verification failed: unable to compute SHA-256 digest')
-	}
-
-	verify_result := C.RSA_verify(C.NID_sha256, digest.data, u32(digest.len), signature.data, u32(signature.len), rsa)
-	if verify_result == 1 {
-		return true
-	}
-
-	return false
+	digest := sha256_digest(message.bytes())!
+	verify_result := C.RSA_verify(C.NID_sha256, digest.data, u32(digest.len), signature.data,
+		u32(signature.len), rsa)
+	return verify_result == 1
 }
 
 fn sign_rs256_bytes(message []u8, private_key_pem string) ![]u8 {
 	trimmed_pem := private_key_pem.trim_space()
 	validate_private_key_pem_format(trimmed_pem)!
-
-	key_bio := C.BIO_new_mem_buf(trimmed_pem.str, trimmed_pem.len)
-	if key_bio == unsafe { nil } {
-		return openssl_error('RS256 signing failed: unable to allocate OpenSSL BIO for PEM')
-	}
-	defer {
-		C.BIO_free(key_bio)
-	}
-
-	pkey := C.PEM_read_bio_PrivateKey(key_bio, unsafe { nil }, unsafe { nil }, unsafe { nil })
-	if pkey == unsafe { nil } {
-		return openssl_error('RS256 signing failed: unable to parse PEM private key')
-	}
+	pkey := parse_private_key(trimmed_pem)!
 	defer {
 		C.EVP_PKEY_free(pkey)
-	}
-
-	if C.EVP_PKEY_get0_RSA(pkey) == unsafe { nil } {
-		return error('RS256 signing failed: PEM key is not an RSA private key')
 	}
 
 	ctx := C.EVP_MD_CTX_new()
@@ -172,7 +195,7 @@ fn sign_rs256_bytes(message []u8, private_key_pem string) ![]u8 {
 		return openssl_error('RS256 signing failed: unable to determine signature size')
 	}
 
-	mut signature := []u8{len: int(sig_len)}
+	mut signature := []u8{len: int(sig_len), init: 0}
 	if C.EVP_DigestSignFinal(ctx, signature.data, &sig_len) != 1 {
 		return openssl_error('RS256 signing failed: OpenSSL RSA signing operation failed')
 	}

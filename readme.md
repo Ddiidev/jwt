@@ -1,7 +1,30 @@
 # JWT
-A simple, self-contained module for making and verifying JWTs using HMAC SHA256. Built to be simple!
+Simple and self-contained JWT implementation for V.
 
-## Example
+This library supports:
+- **HS256** (HMAC + SHA-256)
+- **RS256** (RSA + SHA-256)
+
+## Instalação
+
+No seu `v.mod`:
+
+```v
+Module {
+	dependencies: ['jwt']
+}
+```
+
+Ou via VPM:
+
+```bash
+v install jwt
+```
+
+## Uso simples (compatível com versão anterior, HS256)
+
+Esse é o mesmo estilo de uso que já existia antes:
+
 ```v
 import jwt
 
@@ -13,7 +36,6 @@ pub struct Credential {
 }
 
 fn main() {
-	// Create a new token
 	payload := jwt.Payload[Credential]{
 		sub: '1234567890'
 		ext: Credential{
@@ -21,22 +43,54 @@ fn main() {
 			pass: 'password'
 		}
 	}
-	token := jwt.Token.new(payload, secret)
-	receive_token_from_web := token.str()
 
-	// Validate a token from the web
-	obj_token := jwt.from_str[Credential](receive_token_from_web)!
-	if obj_token.valid_hs256(secret) {
-		println('token valid!')
-		dump(obj_token.payload.ext)
+	// API simples (legada/compatível)
+	token := jwt.Token.new(payload, secret)
+	token_str := token.str()
+
+	parsed := jwt.from_str[Credential](token_str)!
+	if parsed.valid(secret) {
+		println('token HS256 válido')
 	}
 }
 ```
 
+## Exemplo prático com RS256
 
-## Algoritmos e credenciais
+Para RS256, assine com **chave privada PEM** e valide com **chave pública PEM**:
 
-Use opções específicas por algoritmo para evitar ambiguidades:
+```v
+import os
+import jwt
+
+pub struct Claims {
+	role string
+}
+
+fn main() {
+	private_key := os.read_file('private.pem')!
+	public_key := os.read_file('public.pem')!
+
+	payload := jwt.Payload[Claims]{
+		sub: 'user-123'
+		ext: Claims{role: 'admin'}
+	}
+
+	// Assina com RS256
+	token := jwt.Token.new_rs256(payload, private_key)
+	token_str := token.str()
+
+	// Valida com chave pública
+	parsed := jwt.from_str[Claims](token_str)!
+	if parsed.valid_rs256(public_key) {
+		println('token RS256 válido')
+	}
+}
+```
+
+## API por opções (recomendado)
+
+Se quiser evitar qualquer ambiguidade de algoritmo, use a API explícita por opções:
 
 ```v
 // Assinatura HS256
@@ -50,4 +104,42 @@ ok_hs := token_hs.valid_with_options(jwt.Hs256ValidationOptions{secret: secret})
 
 // Validação RS256
 ok_rs := token_rs.valid_with_options(jwt.Rs256ValidationOptions{public_key_pem: public_key})
+```
+
+## Claims e expiração
+
+A struct `Payload[T]` suporta campos padrão JWT (`iss`, `sub`, `aud`, `exp`, `iat`) e claims customizadas em `ext`.
+
+A validação (`valid*`) também verifica se o token está expirado (`exp`).
+
+## Testes
+
+```bash
+v test src
+```
+
+Os testes de RS256 usam fixtures em `testdata/`.
+
+
+## Claims para GitHub App (NumericDate)
+
+Quando precisar gerar JWT para GitHub App, `iss` deve ser o App ID e `iat`/`exp` devem ser NumericDate (segundos desde epoch).
+
+A `Payload[T]` agora aceita `iat` e `exp` como `i64` **ou** `string`, então você pode usar os segundos Unix diretamente:
+
+```v
+import time
+import jwt
+
+const app_id = '123456'
+
+payload := jwt.Payload[map[string]string]{
+	iss: app_id
+	iat: time.now().unix()
+	exp: time.now().add_seconds(540).unix()
+	ext: {}
+}
+
+// Exemplo RS256
+token := jwt.Token.new_rs256(payload, private_key_pem)
 ```
