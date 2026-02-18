@@ -85,8 +85,16 @@ pub fn from_str[T](token string) !Token[T] {
 	}
 }
 
+fn (t Token[T]) payload_segment() string {
+	if t.payload_b64.len > 0 {
+		return t.payload_b64
+	}
+
+	return base64.url_encode(json.encode(t.payload).bytes())
+}
+
 pub fn (t Token[T]) str() string {
-	return t.header + '.' + t.payload_b64 + '.' + t.signature
+	return t.header + '.' + t.payload_segment() + '.' + t.signature
 }
 
 pub fn (t Token[T]) valid(secret string) bool {
@@ -94,7 +102,12 @@ pub fn (t Token[T]) valid(secret string) bool {
 		return false
 	}
 
-	if t.header.len == 0 || t.payload_b64.len == 0 || t.signature.len == 0 {
+	if t.header.len == 0 || t.signature.len == 0 {
+		return false
+	}
+
+	payload_segment := t.payload_segment()
+	if payload_segment.len == 0 {
 		return false
 	}
 
@@ -102,7 +115,7 @@ pub fn (t Token[T]) valid(secret string) bool {
 		return false
 	}
 
-	return verify_by_alg(alg, '${t.header}.${t.payload_b64}', t.signature, secret) or {
+	return verify_by_alg(alg, '${t.header}.${payload_segment}', t.signature, secret) or {
 		false
 	}
 }
