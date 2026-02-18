@@ -59,31 +59,33 @@ pub:
 }
 
 pub fn Token.new[T](payload Payload[T], secret string) Token[T] {
-	return Token.new_hs256(payload, secret)
+	return Token.new_hs256[T](payload, secret)
 }
 
 pub fn Token.new_hs256[T](payload Payload[T], secret string) Token[T] {
-	return Token.new_with_options(payload, Hs256SigningOptions{secret: secret}) or {
+	return Token.new_with_options[T](payload, Hs256SigningOptions{ secret: secret }) or {
 		panic(err.msg())
 	}
 }
 
 pub fn Token.new_rs256[T](payload Payload[T], private_key_pem string) Token[T] {
-	return Token.new_with_options(payload, Rs256SigningOptions{private_key_pem: private_key_pem}) or {
+	return Token.new_with_options[T](payload, Rs256SigningOptions{ private_key_pem: private_key_pem }) or {
 		panic(err.msg())
 	}
 }
 
 pub fn Token.new_with_options[T](payload Payload[T], options SigningOptions) !Token[T] {
-	header := base64.url_encode(json.encode(new_header(HeaderOptions{alg: signing_algorithm(options)})).bytes())
+	header := base64.url_encode(json.encode(new_header(HeaderOptions{
+		alg: signing_algorithm(options)
+	})).bytes())
 	payload_b64 := base64.url_encode(json.encode(payload).bytes())
 	signature := sign_payload(options, '${header}.${payload_b64}')!
 
 	return Token[T]{
-		header: header
+		header:      header
 		payload_b64: payload_b64
-		payload: payload
-		signature: signature
+		payload:     payload
+		signature:   signature
 	}
 }
 
@@ -94,10 +96,10 @@ pub fn from_str[T](token string) !Token[T] {
 	}
 
 	return Token[T]{
-		header: parts[0]
+		header:      parts[0]
 		payload_b64: parts[1]
-		payload: json.decode(Payload[T], base64.url_decode_str(parts[1]))!
-		signature: parts[2]
+		payload:     json.decode(Payload[T], base64.url_decode_str(parts[1]))!
+		signature:   parts[2]
 	}
 }
 
@@ -118,11 +120,11 @@ pub fn (t Token[T]) valid(secret string) bool {
 }
 
 pub fn (t Token[T]) valid_hs256(secret string) bool {
-	return t.valid_with_options(Hs256ValidationOptions{secret: secret})
+	return t.valid_with_options(Hs256ValidationOptions{ secret: secret })
 }
 
 pub fn (t Token[T]) valid_rs256(public_key_pem string) bool {
-	return t.valid_with_options(Rs256ValidationOptions{public_key_pem: public_key_pem})
+	return t.valid_with_options(Rs256ValidationOptions{ public_key_pem: public_key_pem })
 }
 
 pub fn (t Token[T]) valid_with_options(options ValidationOptions) bool {
@@ -148,7 +150,7 @@ pub fn (t Token[T]) valid_with_options(options ValidationOptions) bool {
 			parts[2] == expected_signature
 		}
 		Rs256ValidationOptions {
-			signature := base64.url_decode(parts[2]) or { return false }
+			signature := base64.url_decode(parts[2])
 			verify_rs256_signature(message, signature, options.public_key_pem) or { return false }
 		}
 	}
