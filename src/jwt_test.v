@@ -28,6 +28,21 @@ wjVf7wB6qU9wsMJKyQd84mmfi8P9dv9U+MTQ6MTLf3X3I9vv68sW6l0Y3zYv0sLr
 vJ4i8d9xE5mAwHw=
 -----END PRIVATE KEY-----
 """'
+const rsa_public_key = '"""
+-----BEGIN PUBLIC KEY-----
+MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3yofGGOfY+Owcljai+yD+CUR0
+CqblEH+ArMeruIxJsUXF8bfzJ2Ck+JjO8QTZiCWOY66WLzUpPTPUMb38y/ZZ2/NS
+OnwOI+CIKqVeMlUD6/u8+EzYPmwXzNMDAw4aayuyPzeviZIcpzFD9qn5nzOnL+6Y
+gOWPL+XfEobOzO1oBwIDAQAB
+-----END PUBLIC KEY-----
+"""'
+const rsa_public_key_pkcs1 = '"""
+-----BEGIN RSA PUBLIC KEY-----
+MIGJAoGBALfKh8YY59j47ByWNqL7IP4JRHQKpuUQf4Csx6u4jEmxRcXxt/MnYKT4
+mM7xBNmIJY5jrpYvNSk9M9QxvfzL9lnb81I6fA4j4IgqpV4yVQPr+7z4TNg+bBfM
+0wMDDhprK7I/N6+JkhynMUP2qfmfM6cv7piA5Y8v5d8Shs7M7WgHAgMBAAE=
+-----END RSA PUBLIC KEY-----
+"""'
 
 fn test_valid() {
 	payload := Payload[map[string]string]{
@@ -122,7 +137,58 @@ fn test_new_with_options_rs256() {
 	token := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: jwt.rsa_private_key})!
 
 	assert token.signature.len > 0
-	assert token.valid_with_options(SigningOptions{alg: .rs256, key_material: jwt.rsa_private_key})
+	assert token.valid_with_options(SigningOptions{alg: .rs256, key_material: jwt.rsa_public_key})
+}
+
+fn test_rs256_validates_pkcs1_public_key() {
+	payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: jwt.claims
+	}
+	token := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: jwt.rsa_private_key})!
+
+	assert token.valid_with_options(SigningOptions{alg: .rs256, key_material: jwt.rsa_public_key_pkcs1})
+}
+
+fn test_rs256_rejects_invalid_signature_with_public_key() {
+	payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: jwt.claims
+	}
+	token := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: jwt.rsa_private_key})!
+	parts := token.str().split('.')
+	broken_signature := parts[2][0..parts[2].len - 1] + if parts[2].ends_with('A') { 'B' } else { 'A' }
+	broken_token := from_str[map[string]string]('${parts[0]}.${parts[1]}.${broken_signature}')!
+
+	assert !broken_token.valid_with_options(SigningOptions{alg: .rs256, key_material: jwt.rsa_public_key})
+}
+
+fn test_rs256_rejects_invalid_public_pem() {
+	payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: jwt.claims
+	}
+	token := Token.new_with_options(payload, SigningOptions{alg: .rs256, key_material: jwt.rsa_private_key})!
+
+	assert !token.valid_with_options(SigningOptions{alg: .rs256, key_material: 'not-a-pem'})
+}
+
+fn test_verify_rs256_signature_errors_for_invalid_public_pem() {
+	signature := base64.url_decode('ZmFrZS1zaWduYXR1cmU') or { []u8{} }
+
+	_ := verify_rs256_signature('header.payload', signature, 'not-a-pem') or {
+		assert err.msg().contains('unable to parse PEM public key')
+		return
+	}
+	assert false
+}
+
+fn test_verify_rs256_signature_errors_for_empty_public_pem() {
+	_ := verify_rs256_signature('header.payload', []u8{}, '') or {
+		assert err.msg().contains('PEM public key cannot be empty')
+		return
+	}
+	assert false
 }
 
 fn test_rs256_rejects_empty_pem() {
