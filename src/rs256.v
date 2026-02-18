@@ -17,11 +17,31 @@ struct C.BIO {}
 @[typedef]
 struct C.RSA {}
 
+@[typedef]
+struct C.EVP_MD {}
+
+@[typedef]
+struct C.EVP_MD_CTX {}
+
+@[typedef]
+struct C.EVP_PKEY {}
+
+@[typedef]
+struct C.EVP_PKEY_CTX {}
+
 fn C.BIO_new_mem_buf(buf voidptr, len int) &C.BIO
 fn C.BIO_free(bio &C.BIO) int
 fn C.ERR_get_error() u64
 fn C.ERR_error_string_n(e u64, buf &u8, len usize)
-fn C.PEM_read_bio_RSAPrivateKey(bp &C.BIO, x &&C.RSA, cb voidptr, u voidptr) &C.RSA
+fn C.EVP_DigestSignFinal(ctx &C.EVP_MD_CTX, sig &u8, siglen &usize) int
+fn C.EVP_DigestSignInit(ctx &C.EVP_MD_CTX, pctx &&C.EVP_PKEY_CTX, typ &C.EVP_MD, e voidptr, pkey &C.EVP_PKEY) int
+fn C.EVP_DigestSignUpdate(ctx &C.EVP_MD_CTX, d voidptr, cnt usize) int
+fn C.EVP_MD_CTX_free(ctx &C.EVP_MD_CTX)
+fn C.EVP_MD_CTX_new() &C.EVP_MD_CTX
+fn C.EVP_PKEY_free(pkey &C.EVP_PKEY)
+fn C.EVP_PKEY_get0_RSA(pkey &C.EVP_PKEY) &C.RSA
+fn C.EVP_sha256() &C.EVP_MD
+fn C.PEM_read_bio_PrivateKey(bp &C.BIO, x &&C.EVP_PKEY, cb voidptr, u voidptr) &C.EVP_PKEY
 fn C.PEM_read_bio_RSAPublicKey(bp &C.BIO, x &&C.RSA, cb voidptr, u voidptr) &C.RSA
 fn C.PEM_read_bio_RSA_PUBKEY(bp &C.BIO, x &&C.RSA, cb voidptr, u voidptr) &C.RSA
 fn C.RSA_free(rsa &C.RSA)
@@ -82,18 +102,23 @@ fn new_bio_from_pem(pem string) !&C.BIO {
 	return bio
 }
 
-fn parse_rsa_private_key(private_key_pem string) !&C.RSA {
+fn parse_private_key(private_key_pem string) !&C.EVP_PKEY {
 	mut bio := new_bio_from_pem(private_key_pem)!
 	defer {
 		C.BIO_free(bio)
 	}
 
-	mut rsa := C.PEM_read_bio_RSAPrivateKey(bio, unsafe { nil }, unsafe { nil }, unsafe { nil })
-	if rsa != unsafe { nil } {
-		return rsa
+	pkey := C.PEM_read_bio_PrivateKey(bio, unsafe { nil }, unsafe { nil }, unsafe { nil })
+	if pkey == unsafe { nil } {
+		return openssl_error('RS256 signing failed: unable to parse PEM private key')
 	}
 
-	return openssl_error('RS256 signing failed: unable to parse PEM private key')
+	if C.EVP_PKEY_get0_RSA(pkey) == unsafe { nil } {
+		C.EVP_PKEY_free(pkey)
+		return error('RS256 signing failed: PEM key is not an RSA private key')
+	}
+
+	return pkey
 }
 
 fn parse_rsa_public_key(public_key_pem string) !&C.RSA {
@@ -145,9 +170,25 @@ pub fn verify_rs256_signature(message string, signature []u8, public_key_pem str
 fn sign_rs256_bytes(message []u8, private_key_pem string) ![]u8 {
 	trimmed_pem := private_key_pem.trim_space()
 	validate_private_key_pem_format(trimmed_pem)!
-	rsa := parse_rsa_private_key(trimmed_pem)!
+	pkey := parse_private_key(trimmed_pem)!
 	defer {
-		C.RSA_free(rsa)
+		C.EVP_PKEY_free(pkey)
+	}
+
+	ctx := C.EVP_MD_CTX_new()
+	if ctx == unsafe { nil } {
+		return openssl_error('RS256 signing failed: unable to allocate OpenSSL digest context')
+	}
+	defer {
+		C.EVP_MD_CTX_free(ctx)
+	}
+
+	if C.EVP_DigestSignInit(ctx, unsafe { nil }, C.EVP_sha256(), unsafe { nil }, pkey) != 1 {
+		return openssl_error('RS256 signing failed: unable to initialize RSA-SHA256 signer')
+	}
+
+	if C.EVP_DigestSignUpdate(ctx, message.data, message.len) != 1 {
+		return openssl_error('RS256 signing failed: unable to hash JWT signing input')
 	}
 
 	digest := sha256_digest(message)!
@@ -156,10 +197,8 @@ fn sign_rs256_bytes(message []u8, private_key_pem string) ![]u8 {
 		return openssl_error('RS256 signing failed: unable to determine RSA signature size')
 	}
 
-	mut signature := []u8{len: rsa_size, init: 0}
-	mut sig_len := u32(0)
-	if C.RSA_sign(C.NID_sha256, digest.data, u32(digest.len), signature.data, &sig_len,
-		rsa) != 1 {
+	mut signature := []u8{len: int(sig_len), init: 0}
+	if C.EVP_DigestSignFinal(ctx, signature.data, &sig_len) != 1 {
 		return openssl_error('RS256 signing failed: OpenSSL RSA signing operation failed')
 	}
 

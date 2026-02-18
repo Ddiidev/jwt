@@ -115,7 +115,31 @@ A validação (`valid*`) também verifica se o token está expirado (`exp`).
 ## Testes
 
 ```bash
-v test .
+v test src
 ```
 
 Os testes de RS256 usam fixtures em `testdata/`.
+
+
+## Claims para GitHub App (NumericDate)
+
+Quando precisar gerar JWT para GitHub App, `iss` deve ser o App ID e `iat`/`exp` devem ser NumericDate (segundos desde epoch).
+
+A `Payload[T]` agora aceita `iat` e `exp` como `i64` **ou** `string`, então você pode usar os segundos Unix diretamente:
+
+```v
+import time
+import jwt
+
+const app_id = '123456'
+
+payload := jwt.Payload[map[string]string]{
+	iss: app_id
+	iat: time.now().unix()
+	exp: time.now().add_seconds(540).unix()
+	ext: {}
+}
+
+// Exemplo RS256
+token := jwt.Token.new_rs256(payload, private_key_pem)
+```

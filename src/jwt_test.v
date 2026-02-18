@@ -66,6 +66,18 @@ fn test_no_expired() {
 	assert !token.expired()
 }
 
+fn test_no_expired_with_numeric_unix_exp() {
+	payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: claims
+		exp: time.now().add_seconds(10).unix()
+	}
+	token := Token.new(payload, secret)
+
+	assert token.valid(secret)
+	assert !token.expired()
+}
+
 fn test_from_str() {
 	payload := Payload[map[string]string]{
 		sub: '1234567890'
