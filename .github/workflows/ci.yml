@@ -23,7 +23,6 @@ jobs:
       - name: Check formatting
         run: v fmt -verify src/*.v
 
-
       - name: Debug checked commit and RS256 signer block
         run: |
           git rev-parse HEAD
