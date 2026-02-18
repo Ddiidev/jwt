@@ -1,5 +1,7 @@
 module jwt
 
+import encoding.base64
+import json
 import time
 
 const no_secret = 'pass secret'
@@ -64,9 +66,32 @@ fn test_from_str() {
 	}
 
 	token := Token.new(payload, jwt.secret)
-	token2 := from_str[map[string]string](token.str())! //Não está funcionando
+	token2 := from_str[map[string]string](token.str())!
 	token3 := Token.new(payload2, jwt.secret)
 
 	assert token2 == token
 	assert token2 != token3
+}
+
+fn test_new_with_options_sets_header_algorithm() {
+	payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: jwt.claims
+	}
+	token := Token.new_with_options(payload, SigningOptions{alg: .hs256, key_material: jwt.secret})!
+	header := json.decode(Header, base64.url_decode_str(token.header))!
+
+	assert header.alg == 'HS256'
+	assert header.typ == 'JWT'
+}
+
+fn test_valid_with_options_uses_algorithm() {
+	payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: jwt.claims
+	}
+	token := Token.new_hs256(payload, jwt.secret)
+
+	assert token.valid_with_options(SigningOptions{alg: .hs256, key_material: jwt.secret})
+	assert !token.valid_with_options(SigningOptions{alg: .rs256, key_material: jwt.secret})
 }
