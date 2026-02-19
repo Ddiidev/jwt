@@ -2,39 +2,62 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: ["main", "master"]
   pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
 
 jobs:
-  fmt-and-test:
-    runs-on: ubuntu-latest
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup V
         uses: vlang/setup-v@v1.4
         with:
-          v-version: latest
+          check-latest: true
 
-      - name: V version
-        run: v version
+      # Ubuntu Dependencies
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
 
-      - name: Check formatting
-        run: v fmt -verify src/*.v
-
-      - name: Debug checked commit and RS256 signer block
+      # macOS Dependencies
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
         run: |
-          git rev-parse HEAD
-          sed -n '170,230p' src/rs256.v
-          if rg -n "RSA_size\(|sha256_digest\(message\)!" src/rs256.v; then
-            echo "Detected stale/conflicted RS256 signer code in src/rs256.v"
-            exit 1
-          fi
-          if ! rg -n "mut sig_len := usize\(0\)" src/rs256.v; then
-            echo "Expected EVP signer preflight (sig_len init) not found in src/rs256.v"
-            exit 1
-          fi
+          brew update
+          brew install openssl@3
+          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
+          echo "C_INCLUDE_PATH=$(brew --prefix openssl@3)/include" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(brew --prefix openssl@3)/lib" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> $GITHUB_ENV
 
-      - name: Run project tests
+      # Windows Dependencies
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install openssl --no-progress --force --limit-output --execution-timeout=2700
+
+      - name: Verify formatting
+        run: v fmt -verify .
+
+      # Run Tests
+      - name: Run tests (Ubuntu)
+        if: runner.os == 'Linux'
         run: v test src
+
+      - name: Run tests (macOS)
+        if: runner.os == 'macOS'
+        run: v -cc clang -cflags "-I$(brew --prefix openssl@3)/include" -ldflags "-L$(brew --prefix openssl@3)/lib -lssl -lcrypto" test src
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: v -cc gcc -cflags "-IC:\\Progra~1\\OpenSSL-Win64\\include" -ldflags "-LC:\\Progra~1\\OpenSSL-Win64\\lib -lssl -lcrypto" test src
