@@ -3,9 +3,17 @@ module jwt
 #flag linux -lssl -lcrypto
 #flag darwin -lssl -lcrypto
 #flag freebsd -lssl -lcrypto
-#flag windows -lssl -lcrypto
+#flag windows -IC:/Progra~1/OpenSSL-Win64/include
+#flag windows -LC:/Progra~1/OpenSSL-Win64/lib/VC/x64/MD
+$if msvc {
+	#flag windows C:/Progra~1/OpenSSL-Win64/lib/VC/x64/MD/libssl.lib
+	#flag windows C:/Progra~1/OpenSSL-Win64/lib/VC/x64/MD/libcrypto.lib
+} $else {
+	#flag windows -lssl -lcrypto
+}
 #include <openssl/bio.h>
 #include <openssl/err.h>
+#include <openssl/evp.h>
 #include <openssl/objects.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
@@ -45,8 +53,6 @@ fn C.PEM_read_bio_PrivateKey(bp &C.BIO, x &&C.EVP_PKEY, cb voidptr, u voidptr) &
 fn C.PEM_read_bio_RSAPublicKey(bp &C.BIO, x &&C.RSA, cb voidptr, u voidptr) &C.RSA
 fn C.PEM_read_bio_RSA_PUBKEY(bp &C.BIO, x &&C.RSA, cb voidptr, u voidptr) &C.RSA
 fn C.RSA_free(rsa &C.RSA)
-fn C.RSA_size(rsa &C.RSA) int
-fn C.RSA_sign(type_ int, m &u8, m_len u32, sigret &u8, siglen &u32, rsa &C.RSA) int
 fn C.RSA_verify(type_ int, m &u8, m_len u32, sigbuf &u8, siglen u32, rsa &C.RSA) int
 fn C.SHA256(d &u8, n usize, md &u8) &u8
 
@@ -191,10 +197,9 @@ fn sign_rs256_bytes(message []u8, private_key_pem string) ![]u8 {
 		return openssl_error('RS256 signing failed: unable to hash JWT signing input')
 	}
 
-	digest := sha256_digest(message)!
-	rsa_size := C.RSA_size(rsa)
-	if rsa_size <= 0 {
-		return openssl_error('RS256 signing failed: unable to determine RSA signature size')
+	mut sig_len := usize(0)
+	if C.EVP_DigestSignFinal(ctx, unsafe { nil }, &sig_len) != 1 {
+		return openssl_error('RS256 signing failed: unable to determine signature size')
 	}
 
 	mut signature := []u8{len: int(sig_len), init: 0}

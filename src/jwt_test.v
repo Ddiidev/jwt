@@ -1,9 +1,9 @@
 module jwt
 
-import encoding.base64
-import json
 import os
 import time
+import json
+import encoding.base64
 
 const no_secret = 'pass secret'
 const secret = 'secret'
@@ -58,12 +58,27 @@ fn test_no_expired() {
 	payload := Payload[map[string]string]{
 		sub: '1234567890'
 		ext: claims
-		exp: time.now().add_seconds(10).str()
+		exp: time.now().add_seconds(10).unix()
 	}
 	token := Token.new(payload, secret)
 
 	assert token.valid(secret)
 	assert !token.expired()
+}
+
+fn test_string_exp_preserves_local_unix_time() {
+	future := time.now().add_seconds(60)
+	payload := Payload[map[string]string]{
+		sub: '1234567890'
+		ext: claims
+		exp: future.str() // you can use either string or unix time
+	}
+	exp_time := payload.exp_time() or {
+		assert false
+		return
+	}
+
+	assert exp_time.unix() == future.unix()
 }
 
 fn test_no_expired_with_numeric_unix_exp() {
