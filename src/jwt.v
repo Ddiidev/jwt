@@ -147,7 +147,7 @@ pub fn (t Token[T]) valid_with_options(options ValidationOptions) bool {
 	return match options {
 		Hs256ValidationOptions {
 			expected_signature := sign_hs256(message, options.secret)
-			parts[2] == expected_signature
+			constant_time_equals(parts[2], expected_signature)
 		}
 		Rs256ValidationOptions {
 			signature := b64url_decode_with_padding(parts[2])
@@ -202,4 +202,17 @@ fn sign_payload(options SigningOptions, value string) !string {
 			b64url_encode_no_padding(signed)
 		}
 	}
+}
+
+fn constant_time_equals(a string, b string) bool {
+	if a.len != b.len {
+		return false
+	}
+	a_bytes := a.bytes()
+	b_bytes := b.bytes()
+	mut diff := u8(0)
+	for i in 0 .. a_bytes.len {
+		diff |= a_bytes[i] ^ b_bytes[i]
+	}
+	return diff == 0
 }
